@@ -44,6 +44,12 @@ from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
 from sklearn.metrics import r2_score
 from sklearn.ensemble import RandomForestRegressor
 
+RISK_FACTORS_NUM=4
+NUM_OF_INSTRUMENTS=17
+# ORDER_OF_INSTRUMENTS
+LOOKBACK_PERIOD_FOR_INSTRUMENTS=0
+
+
 
 def train_model(df_of_risks,instruments_df,base_model,grid_params):
     X = df_of_risks
@@ -118,57 +124,89 @@ def stoch_wrapper(df_of_risks):
     decomp = get_decomp(df_of_risks)
     def make_stoch(num):
         # sigma=[0.03, 0.0093, 0.11]
-        num_of_risks=4
-        stoch_generator = np.dot(np.random.normal(size=(num,num_of_risks)),decomp)#*sigma
+        stoch_generator = np.dot(np.random.normal(size=(num,RISK_FACTORS_NUM)),decomp)#*sigma
         return stoch_generator
     return make_stoch
 
+
+stoch_generator = stoch_wrapper(get_decomp())
+
+
+
+def make_step(vector_of_current_vals, vector_of_real_vals, **kwargs):
+    pass
+
+def main():
+    timesteps=10
+    dt = 1/247
+    simulations_num=10
+    df_of_risks, df_of_instruments = get_data()
+    stoch_gen = stoch_wrapper(df_of_risks)
     
-# stoch_generator = stoch_wrapper(get_decomp())
-
-# def simulate_hull_white(
-#     sim_number = 10,):
-#     rub_alpha=0.03
-#     usd_alpha=0.02
-#     sigma=[0.03, 0.0093, 0.11]
-#     k_fx=0.015
-#     dt=14/365
-#     timesteps = 26
-
-#     (
-#         curve_rub,
-#         curve_usd,
-#         curve_fx,
-#         curve_rub_df,
-#         curve_usd_df,
-#         curve_fx_df,
-#         init
-#         ) = get_rates()
+    models = find_best_model(df_of_risks, instruments_df)
 
 
-#     results = np.zeros(shape=(timesteps+1, 3, sim_number))
 
-#     passed_time=0
 
-#     for sim_ix in range(sim_number):
-#         results[0,:,sim_ix] = init
-#         stochs = stoch_generator(timesteps+1)
-#         for i, (rate_rub, rate_usd, rate_fx,df_rub, df_usd,df_fx, stoch_tuple) in enumerate(zip(curve_rub,curve_usd,curve_fx,curve_rub_df,curve_usd_df, curve_fx_df, stochs)):
-#             passed_time+=dt
+    for it in range(LOOKBACK_PERIOD_FOR_INSTRUMENTS, df_of_risks.shape[0]-timesteps):
+        risk_data = df_of_risks.iloc[it-LOOKBACK_PERIOD_FOR_INSTRUMENTS:it+timesteps]
+        instr_data = df_of_instruments.iloc[it-LOOKBACK_PERIOD_FOR_INSTRUMENTS:it+timesteps]
+        init = risk_data.iloc[LOOKBACK_PERIOD_FOR_INSTRUMENTS,:].values.reshape(-1)
 
-#             theta_rub = df_rub + rub_alpha*rate_rub + (sigma[0]**2)*(1-np.exp(-2*rub_alpha*passed_time))/2*rub_alpha
-#             theta_usd = df_usd + usd_alpha*rate_usd + (sigma[1]**2)*(1-np.exp(-2*usd_alpha*passed_time))/2*usd_alpha
+        instr_results = np.zeros(size = (instr_data.shape[1], timesteps, simulations_num))
+        risk_factors_history = np.zeros(size = (RISK_FACTORS_NUM, timesteps, simulations_num))
+        #TODO put init values in results\history if needed
+        for sim_id in range(simulations_num):
+            for ts in range(1,timesteps):
+                risk_factors_increment = make_step(risk_factors_history[:,ts-1,sim_id], risk_data.iloc[ts+LOOKBACK_PERIOD_FOR_INSTRUMENTS])
+                risk_factors_history[:,ts,sim_id] = risk_factors_increment
+                #generate risks here
+        for sim_id in range(simulations_num):
+            #TODO calculate instrunents price here, using  "models"
+        #TODO calculate risks here
 
-#             results[i+1,0,sim_ix] = (theta_rub - rub_alpha* results[:,0,sim_ix].sum())*dt+stoch_tuple[0]
-#             results[i+1,1,sim_ix] = (theta_usd - usd_alpha* results[:,1,sim_ix].sum())*dt+stoch_tuple[1]
-#             results[i+1,2,sim_ix] = k_fx*(rate_fx - np.log( results[:,2,sim_ix].sum()))*dt+stoch_tuple[2]
 
-#     return results
 
-if __name__=='__main__':
-    import numpy as np
-    import pandas as pd
-    df_of_risks = pd.DataFrame(np.random.random(size=(200,5)))
-    df_of_instruments = pd.DataFrame(np.random.random(size=(200,3)))
-    a,b = find_best_model(df_of_risks, df_of_instruments)
-    {i1:a.loc[b.idxmax()[i1], i1] for i1 in a.columns}
+
+
+
+
+
+
+
+
+def simulate_hull_white(
+    sim_number = 10,):
+    # rub_alpha=0.03
+    # usd_alpha=0.02
+    # sigma=[0.03, 0.0093, 0.11]
+    # k_fx=0.015
+    dt=1/247
+    timesteps = 10
+
+
+    results = np.zeros(shape=(timesteps+1, 3, sim_number))
+
+    passed_time=0
+
+    for sim_ix in range(sim_number):
+        results[0,:,sim_ix] = init
+        stochs = stoch_generator(timesteps+1)
+        for i, (rate_rub, rate_usd, rate_fx,df_rub, df_usd,df_fx, stoch_tuple) in enumerate(
+            zip(curve_rub,curve_usd,curve_fx,curve_rub_df,curve_usd_df, curve_fx_df, stochs)):
+            passed_time+=dt
+
+            theta_rub = df_rub + rub_alpha*rate_rub + (sigma[0]**2)*(1-np.exp(-2*rub_alpha*passed_time))/2*rub_alpha
+            theta_usd = df_usd + usd_alpha*rate_usd + (sigma[1]**2)*(1-np.exp(-2*usd_alpha*passed_time))/2*usd_alpha
+
+            results[i+1,0,sim_ix] = (theta_rub - rub_alpha* results[:,0,sim_ix].sum())*dt+stoch_tuple[0]
+            results[i+1,1,sim_ix] = (theta_usd - usd_alpha* results[:,1,sim_ix].sum())*dt+stoch_tuple[1]
+            results[i+1,2,sim_ix] = k_fx*(rate_fx - np.log( results[:,2,sim_ix].sum()))*dt+stoch_tuple[2]
+
+    return results
+
+# if __name__=='__main__':
+#     import numpy as np
+#     import pandas as pd
+#     df_of_risks = pd.DataFrame(np.random.random(size=(200,5)))
+#     df_of_instruments = pd.DataFrame(np.random.random(size=(200,3)))
