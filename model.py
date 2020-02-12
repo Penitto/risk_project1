@@ -43,15 +43,41 @@ from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
 from sklearn.metrics import r2_score
 from sklearn.ensemble import RandomForestRegressor
+from collections import defaultdict
+
+import logging
+import datetime
+
+
+def get_logger():
+
+    logger = logging.getLogger('base')
+    logger.setLevel(logging.DEBUG)
+    # create file handler which logs even debug messages
+    fh = logging.FileHandler(f'./{datetime.datetime.ctime(datetime.datetime.now())}.log')
+    fh.setLevel(logging.DEBUG)
+    # create console handler with a higher log level
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.ERROR)
+    # create formatter and add it to the handlers
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    ch.setFormatter(formatter)
+    fh.setFormatter(formatter)
+    # add the handlers to logger
+    logger.addHandler(ch)
+    logger.addHandler(fh)
+    return logger
 
 RISK_FACTORS_NUM=4
 NUM_OF_INSTRUMENTS=17
 # ORDER_OF_INSTRUMENTS
 LOOKBACK_PERIOD_FOR_INSTRUMENTS=0
-
+logger=get_logger()
 
 
 def train_model(df_of_risks,instruments_df,base_model,grid_params):
+    logger.info(f'Fitting {repr(base_model)}')
+
     X = df_of_risks
     models = {}
     model_scores={}
@@ -71,6 +97,7 @@ def train_model(df_of_risks,instruments_df,base_model,grid_params):
 
 
 def find_best_model(df_of_risks, instruments_df):
+    logger.info('Starting best models fit')
     models_specs = [
         [
             LinearRegression(),
@@ -90,6 +117,7 @@ def find_best_model(df_of_risks, instruments_df):
     models_list = []
     models_scores_list = []
     for model_spec in models_specs:
+
         models, model_scores = train_model(
             df_of_risks,
             instruments_df,
@@ -111,14 +139,16 @@ def find_best_model(df_of_risks, instruments_df):
 
 
 def get_decomp(df_of_risks):
-    merged_interpolated_diff_corr = df_of_risks.diff().iloc[1:].corr()
+    merged_interpolated_diff_corr = df_of_risks.iloc[1:].corr()
     decomposed = linalg.cholesky(merged_interpolated_diff_corr)
     return decomposed
 
 
 
 
-
+def get_data():
+    df_of_risks, df_of_instruments = None, None
+    return df_of_risks, df_of_instruments# all values are diffed already, first values are original (we can cumsum to original series!)
 
 def stoch_wrapper(df_of_risks):
     decomp = get_decomp(df_of_risks)
@@ -133,8 +163,29 @@ stoch_generator = stoch_wrapper(get_decomp())
 
 
 
-def make_step(vector_of_current_vals, vector_of_real_vals, **kwargs):
-    pass
+
+def simulate_risk_factors_once(
+    df_of_risks,
+    stoch_gen,
+    timesteps,
+    dt,):
+    stoch = stoch_generator(timesteps)
+    res = np.zeros(shape=(RISK_FACTORS_NUM, timesteps))
+
+    LOOKBACK_PERIOD_FOR_INSTRUMENTS # dont forget to use!
+
+    #generate risks once here
+    return res
+
+def calculate_risks(
+    instuments_values #array of shape (simulations_num, tsteps,instruments_num) 
+    ):
+    
+    var1=0
+    var2=0
+    return var1, var2
+
+
 
 def main():
     timesteps=10
@@ -143,28 +194,45 @@ def main():
     df_of_risks, df_of_instruments = get_data()
     stoch_gen = stoch_wrapper(df_of_risks)
     
-    models = find_best_model(df_of_risks, instruments_df)
+    models = find_best_model(df_of_risks, df_of_instruments)
 
 
 
-
+    risks_array=[]
     for it in range(LOOKBACK_PERIOD_FOR_INSTRUMENTS, df_of_risks.shape[0]-timesteps):
-        risk_data = df_of_risks.iloc[it-LOOKBACK_PERIOD_FOR_INSTRUMENTS:it+timesteps]
+        risk_data = df_of_risks.iloc[       it-LOOKBACK_PERIOD_FOR_INSTRUMENTS:it+timesteps].values
         instr_data = df_of_instruments.iloc[it-LOOKBACK_PERIOD_FOR_INSTRUMENTS:it+timesteps]
-        init = risk_data.iloc[LOOKBACK_PERIOD_FOR_INSTRUMENTS,:].values.reshape(-1)
-
-        instr_results = np.zeros(size = (instr_data.shape[1], timesteps, simulations_num))
-        risk_factors_history = np.zeros(size = (RISK_FACTORS_NUM, timesteps, simulations_num))
+        init = risk_data.iloc[                 LOOKBACK_PERIOD_FOR_INSTRUMENTS,:].values.reshape(-1)
+        instr_results =        np.zeros(size = ( timesteps, instr_data.shape[1], simulations_num))
+        risk_factors_history = np.zeros(size = ( timesteps, RISK_FACTORS_NUM,    simulations_num))
         #TODO put init values in results\history if needed
         for sim_id in range(simulations_num):
-            for ts in range(1,timesteps):
-                risk_factors_increment = make_step(risk_factors_history[:,ts-1,sim_id], risk_data.iloc[ts+LOOKBACK_PERIOD_FOR_INSTRUMENTS])
-                risk_factors_history[:,ts,sim_id] = risk_factors_increment
-                #generate risks here
-        for sim_id in range(simulations_num):
-            #TODO calculate instrunents price here, using  "models"
-        #TODO calculate risks here
+            sim = simulate_risk_factors_once(
+                risk_data[-timesteps:],
+                stoch_gen,
+                timesteps,
+                dt)
+            risk_factors_history[:,:,sim_id] = sim
 
+
+        simulated_instruments=[]
+        instruments_names = instr_data.columns
+        for sim_id in range(simulations_num):
+            instrument_history = defaultdict(list)
+
+            required_history = np.concatenate((risk_data[:LOOKBACK_PERIOD_FOR_INSTRUMENTS],risk_factors_history[:,:,sim_id]), axis=0)
+            stacks = np.stack([required_history[i:i+LOOKBACK_PERIOD_FOR_INSTRUMENTS] for i in range(required_history.shape[0]-LOOKBACK_PERIOD_FOR_INSTRUMENTS+1)])
+            _ = [instrument_history[name].append(model.predict(stack)) for name,model in models.items() for stack in stacks]
+            predicted_instruments_1_sim = pd.DataFrame(instrument_history).loc[:,instruments_names].values
+
+            simulated_instruments.append(predicted_instruments_1_sim)
+
+        simulated_instruments=np.stack(simulated_instruments) #array of shape (simulations_num, tsteps,instruments_num)
+        risks = calculate_risks(simulated_instruments)
+        risks_array.append(risks)
+    return risks_array
+
+ 
 
 
 
