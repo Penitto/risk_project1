@@ -159,7 +159,7 @@ def stoch_wrapper(df_of_risks):
     return make_stoch
 
 
-stoch_generator = stoch_wrapper(get_decomp())
+# stoch_generator = stoch_wrapper(get_decomp(df_of_risks))
 
 
 
@@ -169,7 +169,7 @@ def simulate_risk_factors_once(
     stoch_gen,
     timesteps,
     dt,):
-    stoch = stoch_generator(timesteps)
+    stoch = stoch_gen(timesteps)
     res = np.zeros(shape=(RISK_FACTORS_NUM, timesteps))
 
     LOOKBACK_PERIOD_FOR_INSTRUMENTS # dont forget to use!
@@ -243,35 +243,38 @@ def main():
 
 
 
-def simulate_hull_white(
-    sim_number = 10,):
-    # rub_alpha=0.03
-    # usd_alpha=0.02
-    # sigma=[0.03, 0.0093, 0.11]
-    # k_fx=0.015
-    dt=1/247
-    timesteps = 10
+# def simulate_hull_white(
+#     sim_number = 10,):
+#     # rub_alpha=0.03
+#     # usd_alpha=0.02
+#     # sigma=[0.03, 0.0093, 0.11]
+#     # k_fx=0.015
+#     dt=1/247
+#     timesteps = 10
 
 
-    results = np.zeros(shape=(timesteps+1, 3, sim_number))
+#     results = np.zeros(shape=(timesteps+1, 3, sim_number))
 
-    passed_time=0
+#     passed_time=0
 
-    for sim_ix in range(sim_number):
-        results[0,:,sim_ix] = init
-        stochs = stoch_generator(timesteps+1)
-        for i, (rate_rub, rate_usd, rate_fx,df_rub, df_usd,df_fx, stoch_tuple) in enumerate(
-            zip(curve_rub,curve_usd,curve_fx,curve_rub_df,curve_usd_df, curve_fx_df, stochs)):
-            passed_time+=dt
+#     for sim_ix in range(sim_number):
+#         results[0,:,sim_ix] = init
+#         stochs = stoch_generator(timesteps+1)
+#         for i, (rate_rub, rate_usd, rate_fx,df_rub, df_usd,df_fx, stoch_tuple) in enumerate(
+#             zip(curve_rub,curve_usd,curve_fx,curve_rub_df,curve_usd_df, curve_fx_df, stochs)):
+#             passed_time+=dt
 
-            theta_rub = df_rub + rub_alpha*rate_rub + (sigma[0]**2)*(1-np.exp(-2*rub_alpha*passed_time))/2*rub_alpha
-            theta_usd = df_usd + usd_alpha*rate_usd + (sigma[1]**2)*(1-np.exp(-2*usd_alpha*passed_time))/2*usd_alpha
+#             theta_rub = df_rub + rub_alpha*rate_rub + (sigma[0]**2)*(1-np.exp(-2*rub_alpha*passed_time))/2*rub_alpha
+#             theta_usd = df_usd + usd_alpha*rate_usd + (sigma[1]**2)*(1-np.exp(-2*usd_alpha*passed_time))/2*usd_alpha
 
-            results[i+1,0,sim_ix] = (theta_rub - rub_alpha* results[:,0,sim_ix].sum())*dt+stoch_tuple[0]
-            results[i+1,1,sim_ix] = (theta_usd - usd_alpha* results[:,1,sim_ix].sum())*dt+stoch_tuple[1]
-            results[i+1,2,sim_ix] = k_fx*(rate_fx - np.log( results[:,2,sim_ix].sum()))*dt+stoch_tuple[2]
+#             results[i+1,0,sim_ix] = (theta_rub - rub_alpha* results[:,0,sim_ix].sum())*dt+stoch_tuple[0]
+#             results[i+1,1,sim_ix] = (theta_usd - usd_alpha* results[:,1,sim_ix].sum())*dt+stoch_tuple[1]
+#             results[i+1,2,sim_ix] = k_fx*(rate_fx - np.log( results[:,2,sim_ix].sum()))*dt+stoch_tuple[2]
 
-    return results
+#     return results
+
+
+
 
 # if __name__=='__main__':
 #     import numpy as np
