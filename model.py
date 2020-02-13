@@ -6,9 +6,21 @@ from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
 from sklearn.metrics import r2_score
 from sklearn.ensemble import RandomForestRegressor
 from collections import defaultdict
-
 import logging
 import datetime
+
+
+
+
+#TODO get_data() - написать подгрузку данных (по сути - адаптировать имеющуюся в ноутбуке)
+#TODO calculate_var(), calculate_es() - написать калькулятор рисков (можно как для отдельных инструментов, так и для подгрупп в портфеле). формат входа обозначен, формат выхода - какой будет удобнее в дальнейшем
+#TODO simulate_risk_factors_once() - написать симулятор для риск-факторов. Функция должна делать один прогон по всем риск-факторам
+#TODO написать бэктестинг - прогон и оценку оригинальных данных по вычисленным рискам
+
+
+
+
+
 
 
 def get_logger():
@@ -73,8 +85,18 @@ def get_decomp(df_of_risks):
 
 
 def get_data():
-    df_of_risks, df_of_instruments = None, None
-    return df_of_risks, df_of_instruments# all values are diffed already, first values are original (we can cumsum to original series!)
+    #Здесь - подгрузка и подготовка данных
+
+
+
+    r_risks=pd.DataFrame()#Риск-факторы, посчитанные в арифметических процентах
+    r_instruments=pd.DataFrame()#доходность инструментов, посчитанная в арифметических процентах
+    act_risks=pd.DataFrame()# реальные значения риск-факторов
+    act_instruments=pd.DataFrame()# реальные значения инструментов
+
+
+    return    r_risks, r_instruments, act_risks, act_instruments
+# all values are diffed already, first values are original (we can cumsum to original series!)
 
 def stoch_wrapper(df_of_risks):
     decomp = get_decomp(df_of_risks)
