@@ -87,12 +87,46 @@ def get_decomp(df_of_risks):
 def get_data():
     #Здесь - подгрузка и подготовка данных
 
+    shares = ['./shares/AFLT_160101_200101.csv', 
+              './shares/GAZP_160101_200101.csv',
+              './shares/GMKN_160101_200101.csv', 
+              './shares/KMAZ_160101_200101.csv', 
+              './shares/LKOH_160101_200101.csv', 
+              './shares/PIKK_160101_200101.csv', 
+              './shares/MGNT_160101_200101.csv', 
+              './shares/RBCM_160101_200101.csv', 
+              './shares/ROSN_160101_200101.csv', 
+              './shares/SBER_160101_200101.csv']
+
+    shares_name = [i[9:13] for i in shares]
+
+    # Нужно интерполировать
+    bonds = ['./bonds/SU26212RMFS9_160101_200101.csv',
+             './bonds/SU26205RMFS3_160101_200101.csv',
+             './bonds/SU26207RMFS9_160101_200101.csv', 
+             './bonds/SU26209RMFS5_160101_200101.csv', 
+             './bonds/SU26211RMFS1_160101_200101.csv']
+
+    bonds_name = [i[8:20] for i in bonds]
+
+    currencies = ['./index/USD_RUB.csv', './index/CNY_RUB.csv']
+
+    currencies_name = [i[8:15] for i in currencies]
+
+    indexes = ['./index/ICE.BRN_160101_200101.csv', 
+               './index/IMOEX_160101_200101.csv', 
+               './index/RTSI_160101_200101.csv']
+
+    indexes_name = ['Brent', 'MOEX', 'RTSI']
+
+    zero_bond = './zerobond.csv'
 
 
-    r_risks=pd.DataFrame()#Риск-факторы, посчитанные в арифметических процентах
-    r_instruments=pd.DataFrame()#доходность инструментов, посчитанная в арифметических процентах
-    act_risks=pd.DataFrame()# реальные значения риск-факторов
-    act_instruments=pd.DataFrame()# реальные значения инструментов
+
+    r_risks = pd.DataFrame() # Риск-факторы, посчитанные в арифметических процентах
+    r_instruments = pd.DataFrame() # доходность инструментов, посчитанная в арифметических процентах
+    act_risks = pd.DataFrame() # реальные значения риск-факторов
+    act_instruments = pd.DataFrame() # реальные значения инструментов
 
 
     return    r_risks, r_instruments, act_risks, act_instruments
