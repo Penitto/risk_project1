@@ -113,11 +113,11 @@ def get_data():
 
     currencies_name = [i[8:15] for i in currencies]
 
-    indexes = ['./index/ICE.BRN_160101_200101.csv', 
-               './index/IMOEX_160101_200101.csv', 
-               './index/RTSI_160101_200101.csv']
+    indexes = ['./index/IMOEX_160101_200101.csv', 
+               './index/RTSI_160101_200101.csv', 
+               './index/ICE.BRN_160101_200101.csv']
 
-    indexes_name = ['Brent', 'MOEX', 'RTSI']
+    indexes_name = ['MOEX', 'RTSI', 'Brent']
 
     zero_bond = './zerobond.csv'
 
@@ -142,18 +142,13 @@ def get_data():
         k += 1
 
     act_instruments = act_instruments.rename(columns={'<CLOSE>' : shares_name[0]})
+    act_instruments = act_instruments.fillna(act_instruments.mean(axis=0))
         
-    act_risks = pd.read_csv(currencies[0], index_col='<DATE>').drop(['<TICKER>', '<PER>', '<TIME>', '<HIGH>', '<LOW>', '<VOL>', '<OPEN>'], axis=1)
+    act_risks = pd.read_csv(indexes[0], index_col='<DATE>').drop(['<TICKER>', '<PER>', '<TIME>', '<HIGH>', '<LOW>', '<VOL>', '<OPEN>'], axis=1)
     act_risks.index = pd.to_datetime(act_risks.index) 
 
-    tmp = pd.read_csv(i, index_col='Date') \
-            .drop(['Open', 'High', 'Low', 'Change %'], axis=1) \
-            .rename(columns={'Price' : currencies_name[k]})
-    tmp.index = pd.to_datetime(tmp.index)
-    act_risks = act_risks.join(tmp, how='left')
-    
-    k = 0
-    for i in indexes:
+    k = 1
+    for i in indexes[1:]:
         tmp = pd.read_csv(i, index_col='<DATE>') \
                 .drop(['<TICKER>', '<PER>', '<TIME>', '<HIGH>', '<LOW>', '<VOL>', '<OPEN>'], axis=1) \
                 .rename(columns={'<CLOSE>' : indexes_name[k]})
@@ -161,16 +156,34 @@ def get_data():
         act_risks = act_risks.join(tmp, how='left')
         k += 1
 
+    k = 0
+    for i in currencies:
+        tmp = pd.read_csv(i, index_col='Date') \
+                .drop(['Open', 'High', 'Low', 'Change %'], axis=1) \
+                .rename(columns={'Price' : currencies_name[k]})
+        tmp.index = pd.to_datetime(tmp.index)
+        act_risks = act_risks.join(tmp, how='left')
+        k += 1
+    
     zero_bond_df = pd.read_csv(zero_bond, sep=';', index_col='Date')
     zero_bond_df.index = pd.to_datetime(zero_bond_df.index)
     act_risks = act_risks.join(zero_bond_df, how='left')
     act_risks = act_risks.fillna(act_risks.mean(axis=0))
 
-    r_risks = pd.DataFrame() # Риск-факторы, посчитанные в арифметических процентах
-    r_instruments = pd.DataFrame() # доходность инструментов, посчитанная в арифметических процентах
-    act_risks = pd.DataFrame() # реальные значения риск-факторов
-    act_instruments = pd.DataFrame() # реальные значения инструментов
+    tmp = act_risks.diff()
+    temp = act_risks.iloc[:-1,:]
+    temp.index = tmp.iloc[1:,:].index
+    r_risks = tmp.iloc[1:,:] / temp
+    
+    tmp = act_instruments.diff()
+    temp = act_instruments.iloc[:-1,:]
+    temp.index = tmp.iloc[1:,:].index
+    r_instruments = tmp.iloc[1:,:] / temp
 
+    # act_risks = pd.DataFrame() # реальные значения риск-факторов
+    # act_instruments = pd.DataFrame() # реальные значения инструментов
+    # r_risks = pd.DataFrame() # Риск-факторы, посчитанные в арифметических процентах
+    # r_instruments = pd.DataFrame() # доходность инструментов, посчитанная в арифметических процентах
 
     return    r_risks, r_instruments, act_risks, act_instruments
 # all values are diffed already, first values are original (we can cumsum to original series!)
