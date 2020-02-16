@@ -8,13 +8,10 @@ from sklearn.ensemble import RandomForestRegressor
 from collections import defaultdict
 import logging
 import datetime
+import pdb
 
 
 
-
-#TODO get_data() - написать подгрузку данных (по сути - адаптировать имеющуюся в ноутбуке)
-#TODO calculate_var(), calculate_es() - написать калькулятор рисков (можно как для отдельных инструментов, так и для подгрупп в портфеле). формат входа обозначен, формат выхода - какой будет удобнее в дальнейшем
-#TODO simulate_risk_factors_once() - написать симулятор для риск-факторов. Функция должна делать один прогон по всем риск-факторам
 #TODO написать бэктестинг - прогон и оценку оригинальных данных по вычисленным рискам
 
 
@@ -28,11 +25,11 @@ def get_logger():
     logger = logging.getLogger('base')
     logger.setLevel(logging.DEBUG)
     # create file handler which logs even debug messages
-    fh = logging.FileHandler(f'./{datetime.datetime.ctime(datetime.datetime.now())}.log')
+    fh = logging.FileHandler(f'./logs from {datetime.datetime.isoformat(datetime.datetime.now())[:10]}.log')
     fh.setLevel(logging.DEBUG)
     # create console handler with a higher log level
     ch = logging.StreamHandler()
-    ch.setLevel(logging.ERROR)
+    ch.setLevel(logging.DEBUG)
     # create formatter and add it to the handlers
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     ch.setFormatter(formatter)
@@ -44,10 +41,13 @@ def get_logger():
 
 
 #Глобальные параметры
-RISK_FACTORS_NUM=4
+RISK_FACTORS_NUM=17
 NUM_OF_INSTRUMENTS=17
 PRICE_OF_INSTRUMENTS = [10**6 for _ in range(10)]+[10**7 for _ in range(5)]+[10**7 for _ in range(2)]
-LOOKBACK=0
+INSTRUMENTS_LOOKBACK=10
+RISKS_LOOKBACK=10
+SIM_NUM=100
+
 logger=get_logger()
 
 
@@ -58,9 +58,9 @@ def get_model():
 def train_models(risks_df, instruments_df):
     logger.info('Model training started')
     models = []
-    X = np.stack([risks_df.values[i:i+LOOKBACK].reshape(-1) for i in range(risks_df.shape[0]-LOOKBACK)])
+    X = np.stack([risks_df.values[i:i+INSTRUMENTS_LOOKBACK].reshape(-1) for i in range(risks_df.shape[0]-INSTRUMENTS_LOOKBACK)])
     for ins in range(NUM_OF_INSTRUMENTS):
-        y_ = instruments_df.values[LOOKBACK:,ins]
+        y_ = instruments_df.values[INSTRUMENTS_LOOKBACK:,ins]
         lr = get_model()
         lr.fit(X,y_)
         models.append(lr)
@@ -68,7 +68,7 @@ def train_models(risks_df, instruments_df):
     return models
 
 def inference_models(risks_df, models):
-    X = np.stack([risks_df.values[i:i+LOOKBACK].reshape(-1) for i in range(risks_df.shape[0]-LOOKBACK)])
+    X = np.stack([risks_df[i:i+INSTRUMENTS_LOOKBACK].reshape(-1) for i in range(risks_df.shape[0]-INSTRUMENTS_LOOKBACK)])
     pred = np.stack([model.predict(X) for model in models], axis=1)
     return pred
 
@@ -121,14 +121,14 @@ def get_data():
 
     zero_bond = './zerobond.csv'
 
-    act_instruments = pd.read_csv(shares[0], index_col='<DATE>').drop(['<TICKER>', '<PER>', '<TIME>', '<HIGH>', '<LOW>', '<VOL>', '<OPEN>'], axis=1)
-    act_instruments.index = pd.to_datetime(act_instruments.index)
+    act_instruments = pd.read_csv(shares[0], index_col='<DATE>').drop(['<TICKER>', '<PER>', '<TIME>', '<HIGH>', '<LOW>', '<VOL>', '<OPEN>'], axis=1).rename(columns={'<CLOSE>':shares_name[0]})
+    act_instruments.index = pd.to_datetime(act_instruments.index, dayfirst=True)
     k = 1
     for i in shares[1:]:
         tmp = pd.read_csv(i, index_col='<DATE>') \
                 .drop(['<TICKER>', '<PER>', '<TIME>', '<HIGH>', '<LOW>', '<VOL>', '<OPEN>'], axis=1) \
                 .rename(columns={'<CLOSE>': shares_name[k]})
-        tmp.index = pd.to_datetime(tmp.index)
+        tmp.index = pd.to_datetime(tmp.index, dayfirst=True)
         act_instruments = act_instruments.join(tmp, how='left')
         k += 1
         
@@ -137,6 +137,15 @@ def get_data():
         tmp = pd.read_csv(i, index_col='<DATE>') \
                 .drop(['<TICKER>', '<PER>', '<TIME>', '<HIGH>', '<LOW>', '<VOL>', '<OPEN>'], axis=1) \
                 .rename(columns={'<CLOSE>' : bonds_name[k]})
+        tmp.index = pd.to_datetime(tmp.index, dayfirst=True)
+        act_instruments = act_instruments.join(tmp, how='left')
+        k += 1
+
+    k=0
+    for i in currencies:
+        tmp = pd.read_csv(i, index_col='Date') \
+                .drop(['Open', 'High', 'Low', 'Change %'], axis=1) \
+                .rename(columns={'Price' : currencies_name[k]})
         tmp.index = pd.to_datetime(tmp.index)
         act_instruments = act_instruments.join(tmp, how='left')
         k += 1
@@ -144,15 +153,15 @@ def get_data():
     act_instruments = act_instruments.rename(columns={'<CLOSE>' : shares_name[0]})
     act_instruments = act_instruments.fillna(act_instruments.mean(axis=0))
         
-    act_risks = pd.read_csv(indexes[0], index_col='<DATE>').drop(['<TICKER>', '<PER>', '<TIME>', '<HIGH>', '<LOW>', '<VOL>', '<OPEN>'], axis=1)
-    act_risks.index = pd.to_datetime(act_risks.index) 
+    act_risks = pd.read_csv(indexes[0], index_col='<DATE>').drop(['<TICKER>', '<PER>', '<TIME>', '<HIGH>', '<LOW>', '<VOL>', '<OPEN>'], axis=1).rename(columns={'<CLOSE>':indexes_name[0]})
+    act_risks.index = pd.to_datetime(act_risks.index, dayfirst=True) 
 
     k = 1
     for i in indexes[1:]:
         tmp = pd.read_csv(i, index_col='<DATE>') \
                 .drop(['<TICKER>', '<PER>', '<TIME>', '<HIGH>', '<LOW>', '<VOL>', '<OPEN>'], axis=1) \
                 .rename(columns={'<CLOSE>' : indexes_name[k]})
-        tmp.index = pd.to_datetime(tmp.index)
+        tmp.index = pd.to_datetime(tmp.index, dayfirst=True)
         act_risks = act_risks.join(tmp, how='left')
         k += 1
 
@@ -161,12 +170,12 @@ def get_data():
         tmp = pd.read_csv(i, index_col='Date') \
                 .drop(['Open', 'High', 'Low', 'Change %'], axis=1) \
                 .rename(columns={'Price' : currencies_name[k]})
-        tmp.index = pd.to_datetime(tmp.index)
+        tmp.index = pd.to_datetime(tmp.index, dayfirst=True)
         act_risks = act_risks.join(tmp, how='left')
         k += 1
     
     zero_bond_df = pd.read_csv(zero_bond, sep=';', index_col='Date')
-    zero_bond_df.index = pd.to_datetime(zero_bond_df.index)
+    zero_bond_df.index = pd.to_datetime(zero_bond_df.index, dayfirst=True)
     act_risks = act_risks.join(zero_bond_df, how='left')
     act_risks = act_risks.fillna(act_risks.mean(axis=0))
 
@@ -197,33 +206,46 @@ def stoch_wrapper(df_of_risks):
     return make_stoch
 
 
-def simulate_risk_factors_once(
-    df_of_risks,
-    stoch_gen,
-    timesteps,
-    dt,):
-    stoch = stoch_gen(timesteps)
-    res = np.zeros(shape=(RISK_FACTORS_NUM, timesteps))
+def params_for_gbm(data):
+    mu = np.mean(data)
+    sigma_sq = (-1 + np.sqrt(1 + ((data - mu) ** 2).sum() / data.shape[0])) / 0.5
+    drift = mu - 0.5 * sigma_sq
 
-    # LOOKBACKS # dont forget to use!
+    return mu, sigma_sq,drift
 
-    #generate risks once here
-    return res
+
+def generate_gbm_sim(init_array, pred_param, stochs,dt, time_steps):
+    #generates one complete simulaiton
+    mu, sigma_sq, drift = pred_param
+    sim_res = np.zeros(shape=(time_steps+1, RISK_FACTORS_NUM))
+    sim_res[0,:] = init_array
+    # stochs - np array of (tsteps, factors)
+    for t in range(time_steps):
+
+        sim_res[t+1] = sim_res.sum(axis=0) + drift * dt + np.sqrt(sigma_sq) * stochs[t]
+
+    return sim_res[1:]
+
+
 
 
 
 def calculate_var(prices):# array of shape (instruments_num, simulations_num)
-    return 0
+    VaRs = np.percentile(prices, axis=1, q=5)
+    
+    return VaRs
+
 def calculate_es(prices):# array of shape (instruments_num, simulations_num)
-    return 0
+    ESes = [prices[i][prices[i]<np.percentile(prices[i], q=2.5)].mean() for i in range(prices.shape[0]) ]
+    return ESes
 
 def calculate_risks(
     instruments_values #array of shape (tsteps,instruments_num,simulations_num, ) 
     ):
     # es and var, 1 and 10 days
-    original_prices = np.array(PRICE_OF_INSTRUMENTS)
-    original_prices_broadcasted = np.broadcast_to(original_prices, instruments_values.shape[1:])
-    prices = original_prices_broadcasted.copy(deep=True)
+    original_prices = np.array(PRICE_OF_INSTRUMENTS,dtype=float)
+    original_prices_broadcasted = np.broadcast_to(original_prices.reshape(-1,1), instruments_values.shape[1:])
+    prices = original_prices_broadcasted.copy()
 
     for i in range(instruments_values.shape[0]):
         #move one day forward
@@ -245,34 +267,41 @@ def calculate_risks(
 def main():
     timesteps=10
     dt = 1/247
-    simulations_num=10
+    simulations_num=SIM_NUM
     r_risks, r_instruments, act_risks, act_instruments = get_data()
     logger.info('Data is fetched')
+    
     stoch_gen = stoch_wrapper(r_risks)
     models = train_models(r_risks, r_instruments) #мы ограничиваем трейн?
     
     calculated_risks=dict()
-    for it in range(max(LOOKBACK,1), r_risks.shape[0]-timesteps):
+    for it in range(max(RISKS_LOOKBACK, INSTRUMENTS_LOOKBACK,1), r_risks.shape[0]-timesteps):
         if it%100==0:
             logger.info(f'iteration {it} is in')
+        local_pivot = max(RISKS_LOOKBACK, INSTRUMENTS_LOOKBACK)
+        time = r_risks.index[it]
+        risk_data = r_risks.iloc[       it-local_pivot:it+timesteps].values
+        instr_data = r_instruments.iloc[it-local_pivot:it+timesteps]#what for?
+        init_ins = act_instruments.iloc[  INSTRUMENTS_LOOKBACK+it,:].values.reshape(-1)
+        instr_results =        np.zeros(shape = ( timesteps, instr_data.shape[1], simulations_num)) #Сюда запишем результат предсказаний по инструментам
+        risk_factors_history = np.zeros(shape = ( timesteps, RISK_FACTORS_NUM,    simulations_num)) #Сюда запишем историю симуляции рисков
 
-        time = r_risks.index[LOOKBACK+it]
-        risk_data = r_risks.iloc[       it-LOOKBACK:it+timesteps].values
-        instr_data = r_instruments.iloc[it-LOOKBACK:it+timesteps]#what for?
-        init_ins = act_instruments.iloc[                 LOOKBACK+it,:].values.reshape(-1)
-        instr_results =        np.zeros(size = ( timesteps, instr_data.shape[1], simulations_num)) #Сюда запишем результат предсказаний по инструментам
-        risk_factors_history = np.zeros(size = ( timesteps, RISK_FACTORS_NUM,    simulations_num)) #Сюда запишем историю симуляции рисков
+        #estimation of params for risk sim
+        history_to_estimate_params = r_risks.iloc[local_pivot-RISKS_LOOKBACK:-timesteps]
+        init_array = r_risks.iloc[-timesteps]
+
+        gbm_params = params_for_gbm(history_to_estimate_params)
         for sim_id in range(simulations_num):
-            sim = simulate_risk_factors_once(
-                risk_data[-timesteps:],
-                stoch_gen,
-                timesteps,
-                dt)
+            stochs = stoch_gen(timesteps)
+
+            sim = generate_gbm_sim(init_array, gbm_params, stochs, dt, timesteps)
             risk_factors_history[:,:,sim_id] = sim
 
 
         instruments_names = instr_data.columns
-        broadcasted_lookback_history = np.broadcast_to(risk_data.iloc[:LOOKBACK],(LOOKBACK,RISK_FACTORS_NUM,simulations_num))
+
+        broadcasted_lookback_history = np.stack([risk_data[:INSTRUMENTS_LOOKBACK] for _ in range(simulations_num)], axis=-1)
+        # broadcasted_lookback_history = np.broadcast_to(risk_data[:INSTRUMENTS_LOOKBACK],(INSTRUMENTS_LOOKBACK,RISK_FACTORS_NUM,simulations_num))
         appended_history = np.concatenate((broadcasted_lookback_history,risk_factors_history),axis=0)
 
 
@@ -281,8 +310,14 @@ def main():
 
         risks = calculate_risks(simulated_instruments)
         calculated_risks[time] = risks
+    
 
-    return calculated_risks
+    var1={k:v[0] for k,v in calculated_risks.items()}
+    es1={k:v[1] for k,v in calculated_risks.items()}
+    var10={k:v[2] for k,v in calculated_risks.items()}
+    es10={k:v[3] for k,v in calculated_risks.items()}
+
+    return var1,es1,var10,es10
 
  
 
