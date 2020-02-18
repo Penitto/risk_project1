@@ -9,6 +9,7 @@ from collections import defaultdict
 import logging
 import datetime
 import pdb
+import matplotlib.pyplot as plt
 
 
 
@@ -226,7 +227,29 @@ def generate_gbm_sim(init_array, pred_param, stochs,dt, time_steps):
 
     return sim_res[1:]
 
+# Загнал датафрейм, получил графички данных его колонок
+def plot_df(df):
+    plt.figure(figsize = (16, 40))
 
+    for num, col in enumerate(df.columns):
+        plt.subplot(len(df.columns) // 2 + 1, 2, num + 1)
+        plt.plot(df[col])
+        plt.title(col)
+    plt.show()
+
+    plt.figure(figsize = (16, 40))
+
+    for num, col in enumerate(df.columns):
+        plt.subplot(len(df.columns) // 2 + 1, 2, num + 1)
+        plt.hist(df[col])
+        plt.title(col)
+    plt.show()
+
+# Нарисовать симуляцию
+def plot_sim(simulation):
+    plt.figure(figsize=(16,40))
+    plt.plot(simulation)
+    plt.show()
 
 
 
