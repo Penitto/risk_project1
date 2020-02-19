@@ -223,7 +223,7 @@ def generate_gbm_sim(init_array, pred_param, stochs,dt, time_steps):
     # stochs - np array of (tsteps, factors)
     for t in range(time_steps):
 
-        sim_res[t+1] = sim_res.sum(axis=0) + drift * dt + np.sqrt(sigma_sq) * stochs[t]
+        sim_res[t+1] = sim_res[t] + drift * dt + np.sqrt(sigma_sq) * stochs[t]
 
     return sim_res[1:]
 
@@ -247,7 +247,7 @@ def plot_df(df):
 
 # Нарисовать симуляцию
 def plot_sim(simulation):
-    plt.figure(figsize=(16,40))
+    plt.figure(figsize=(16,10))
     plt.plot(simulation)
     plt.show()
 
