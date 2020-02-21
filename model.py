@@ -180,15 +180,9 @@ def get_data():
     act_risks = act_risks.join(zero_bond_df, how='left')
     act_risks = act_risks.fillna(act_risks.mean(axis=0))
 
-    tmp = act_risks.diff()
-    temp = act_risks.iloc[:-1,:]
-    temp.index = tmp.iloc[1:,:].index
-    r_risks = tmp.iloc[1:,:] / temp
+    r_risks = act_risks.pct_change().dropna(how='any',axis=0)
     
-    tmp = act_instruments.diff()
-    temp = act_instruments.iloc[:-1,:]
-    temp.index = tmp.iloc[1:,:].index
-    r_instruments = tmp.iloc[1:,:] / temp
+    r_instruments = act_instruments.pct_change().dropna(how='any',axis=0)
 
     # act_risks = pd.DataFrame() # реальные значения риск-факторов
     # act_instruments = pd.DataFrame() # реальные значения инструментов
@@ -196,13 +190,11 @@ def get_data():
     # r_instruments = pd.DataFrame() # доходность инструментов, посчитанная в арифметических процентах
 
     return    r_risks, r_instruments, act_risks, act_instruments
-# all values are diffed already, first values are original (we can cumsum to original series!)
 
 def stoch_wrapper(df_of_risks):
     decomp = get_decomp(df_of_risks)
     def make_stoch(num):
-        # sigma=[0.03, 0.0093, 0.11]
-        stoch_generator = np.dot(np.random.normal(size=(num,RISK_FACTORS_NUM)),decomp)#*sigma
+        stoch_generator = np.dot(np.random.normal(size=(num,RISK_FACTORS_NUM)),decomp)
         return stoch_generator
     return make_stoch
 
@@ -226,6 +218,9 @@ def generate_gbm_sim(init_array, pred_param, stochs,dt, time_steps):
         sim_res[t+1] = sim_res[t] + drift * dt + np.sqrt(sigma_sq) * stochs[t]
 
     return sim_res[1:]
+
+
+
 
 # Загнал датафрейм, получил графички данных его колонок
 def plot_df(df):
@@ -254,7 +249,7 @@ def plot_sim(simulation):
 
 
 def calculate_var(prices):# array of shape (instruments_num, simulations_num)
-    VaRs = np.percentile(prices, axis=1, q=5)
+    VaRs = np.percentile(prices, axis=1, q=1)
     
     return VaRs
 
@@ -265,6 +260,8 @@ def calculate_es(prices):# array of shape (instruments_num, simulations_num)
 def calculate_risks(
     instruments_values #array of shape (tsteps,instruments_num,simulations_num, ) 
     ):
+
+    #TODO добавить портфелизацию - подсчет риска для захардкоженных портфелей
     # es and var, 1 and 10 days
     original_prices = np.array(PRICE_OF_INSTRUMENTS,dtype=float)
     original_prices_broadcasted = np.broadcast_to(original_prices.reshape(-1,1), instruments_values.shape[1:])
@@ -284,6 +281,12 @@ def calculate_risks(
     var10=calculate_var(prices)
     es10=calculate_var(prices)
     return var0,es0,var10,es10
+
+def backtest_var():
+    
+    pass
+
+
 
 
 
@@ -320,7 +323,7 @@ def main():
             sim = generate_gbm_sim(init_array, gbm_params, stochs, dt, timesteps)
             risk_factors_history[:,:,sim_id] = sim
 
-
+        pdb.set_trace()
         instruments_names = instr_data.columns
 
         broadcasted_lookback_history = np.stack([risk_data[:INSTRUMENTS_LOOKBACK] for _ in range(simulations_num)], axis=-1)
