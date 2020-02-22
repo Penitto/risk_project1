@@ -365,18 +365,42 @@ def main():
         risks = calculate_risks(simulated_instruments,one_day_history,ten_day_history)#format: list of elements - [{'1day','10day}, 'portfolio_name',{'es','var'}, value]
         calculated_risks[time] = risks
         calculated_risks.extend([[time, *x] for x in risks])
-    
+
+    df_risks = pd.DataFrame(calculated_risks, columns=['date','horizon', 'portfolio_name','risk_kind', 'value'])
     return calculated_risks
 
  
 
 
 
+def backtest_main_loop(
+    df_risks,
+    r_instruments,
+):
+    for instrument in df_risks['portfilio_name'].unique():
+        if instrument in r_instruments:
+            instrument_data = r_instruments.loc[:,instrument]
+        elif instrument in PORTFOLIOS_INDEX.keys():
+            instrument_data = r_instruments.iloc[:,PORTFOLIOS_INDEX[instrument]]
+        else:
+            logger.error(f'{instrument} portfolio hasnt been found')
+        print(f'{instrument} portfolio hasnt been found')
+        continue
+        for risk_kind in sorted(df_risks['risk_kind'].unique()):
+            risks_data = df_risks.loc[
+                (
+                    df_risks['risk_kind']==risk_kind
+                )&(
+                    df_risks['portfolio_name']==instrument
+                )
+            ]
+            result = calc_one_risk_kind_one_instrument(risks_data, instrument_data)
+            #do something with result
 
 
-
-
-
+def calc_one_risk_kind_one_instrument(risks_data, instrument_data):
+    #actually calculate risk
+    return []
 
 """
 
