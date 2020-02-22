@@ -275,14 +275,17 @@ def calculate_var_and_es(r):
 
 def calculate_portfolio_risks(r, calculate_individuals=True):
     #shape (instruments, simulation)
-    ports = {}
+    ports = []
     for port_name, port_index in PORTFOLIOS_INDEX.items():
         var,es = calculate_var_and_es(r[port_index])
+        ports.append([port_name, 'es',es])
+        ports.append([port_name, 'var',var])
         ports[port_name] = {'var':var,'es':es}
     if calculate_individuals:
         for ix, name in enumerate(instruments_names):
             var,es = calculate_var_and_es(r[ix])
-            ports[name] = {'var':var,'es':es}
+            ports.append([name, 'es',es])
+            ports.append([name, 'var',var])
     return ports
 
 
@@ -303,13 +306,13 @@ def calculate_risks(
         cur_movements = instruments_values[i,:,:]
         prices +=np.multiply(prices, cur_movements)
         if i==0:
-            risks_for_1 = calc_portfolio_risks(prices-original_prices_broadcasted)
+            risks_for_1 = [['1day', *x] for x in calculate_portfolio_risks(prices-original_prices_broadcasted)]
         
         #rebalance
         prices = np.multiply((prices.sum(axis=0)/original_prices.sum()), prices)
 
-    risks_for_10 = calc_portfolio_risks(prices-original_prices_broadcasted)
-    return risks_for_1, risks_for_10
+    risks_for_10 = [['10day', *x] for x in calculate_portfolio_risks(prices-original_prices_broadcasted)]
+    return risks_for_1+risks_for_10
 
 
 
@@ -327,7 +330,7 @@ def main():
     global instruments_names
     instruments_names = r_instruments.columns
 
-    calculated_risks=dict()
+    calculated_risks=list()# will be list of format ['date', {'1day','10day}, 'portfolio_name',{'es','var'}, value]
     for it in range(max(RISKS_LOOKBACK, INSTRUMENTS_LOOKBACK,1), r_risks.shape[0]-timesteps):
         if it%100==0:
             logger.info(f'iteration {it} is in')
@@ -352,7 +355,6 @@ def main():
 
 
         broadcasted_lookback_history = np.stack([risk_data[:INSTRUMENTS_LOOKBACK] for _ in range(simulations_num)], axis=-1)
-        # broadcasted_lookback_history = np.broadcast_to(risk_data[:INSTRUMENTS_LOOKBACK],(INSTRUMENTS_LOOKBACK,RISK_FACTORS_NUM,simulations_num))
         appended_history = np.concatenate((broadcasted_lookback_history,risk_factors_history),axis=0)
 
 
@@ -360,16 +362,11 @@ def main():
 
         one_day_history = r_instruments.iloc[-timesteps:-timesteps+1]
         ten_day_history = r_instruments.iloc[-timesteps:]
-        risks = calculate_risks(simulated_instruments,one_day_history,ten_day_history)
+        risks = calculate_risks(simulated_instruments,one_day_history,ten_day_history)#format: list of elements - [{'1day','10day}, 'portfolio_name',{'es','var'}, value]
         calculated_risks[time] = risks
+        calculated_risks.extend([[time, *x] for x in risks])
     
-
-    var1={k:v[0] for k,v in calculated_risks.items()}
-    es1={k:v[1] for k,v in calculated_risks.items()}
-    var10={k:v[2] for k,v in calculated_risks.items()}
-    es10={k:v[3] for k,v in calculated_risks.items()}
-
-    return var1,es1,var10,es10
+    return calculated_risks
 
  
 
