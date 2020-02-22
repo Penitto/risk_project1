@@ -10,8 +10,8 @@ import logging
 import datetime
 import pdb
 import matplotlib.pyplot as plt
-
-
+import arch
+import scipy.stats as ss
 
 #TODO написать бэктестинг - прогон и оценку оригинальных данных по вычисленным рискам
 
@@ -45,6 +45,7 @@ def get_logger():
 RISK_FACTORS_NUM=17
 NUM_OF_INSTRUMENTS=17
 PRICE_OF_INSTRUMENTS = [10**6 for _ in range(10)]+[10**7 for _ in range(5)]+[10**7 for _ in range(2)]
+PORTFOLIOS_INDEX={'STOCKS':np.arange(10),'BONDS':np.arange(5)+10,'CURRENCY':np.array([15,16]),'ALL':np.arange(17)}
 INSTRUMENTS_LOOKBACK=10
 RISKS_LOOKBACK=10
 SIM_NUM=100
@@ -248,17 +249,42 @@ def plot_sim(simulation):
 
 
 
-def calculate_var(prices):# array of shape (instruments_num, simulations_num)
-    VaRs = np.percentile(prices, axis=1, q=1)
-    
-    return VaRs
 
-def calculate_es(prices):# array of shape (instruments_num, simulations_num)
-    ESes = [prices[i][prices[i]<np.percentile(prices[i], q=2.5)].mean() for i in range(prices.shape[0]) ]
-    return ESes
+def calc_VaR(r, level=0.95, kind='historical'):# get 1d array of values
+    if kind=='historical':
+        return np.percentile(r, axis=1, q=level*100)
+    elif kind=='normal':
+        mu, sigma = np.mean(r), np.std(r)
+        return - mu + ss.norm.ppf(level) * sigma
+    elif kind=='garch':
+        K = 100
+        mdl = arch.arch_model(r * K).fit(disp='off')
+        forecast = mdl.forecast()
+        mu, sigma = forecast.mean.values[-1] / K, np.sqrt(forecast.variance.values[-1]) / K
+        return - mu + ss.norm.ppf(level) * sigma
+
+
+def calculate_var_and_es(r):
+    var_alpha=0.01
+    es_alpha=0.025
+
+    var = calc_VaR(r, level=var_alpha)
+    var_for_es = calc_VaR(r, level=es_alpha)
+    es = r[r<var_for_es].mean()
+    return var, es
+
+
+
+
+
+# def calculate_es(prices):# array of shape (instruments_num, simulations_num)
+#     ESes = [prices[i][prices[i]<np.percentile(prices[i], q=2.5)].mean() for i in range(prices.shape[0]) ]
+#     return ESes
 
 def calculate_risks(
-    instruments_values #array of shape (tsteps,instruments_num,simulations_num, ) 
+    instruments_values, #array of shape (tsteps,instruments_num,simulations_num, ) 
+    one_day_history, # init and next day
+    ten_day_history # data from init to the 'timesteps' 
     ):
 
     #TODO добавить портфелизацию - подсчет риска для захардкоженных портфелей
@@ -281,10 +307,6 @@ def calculate_risks(
     var10=calculate_var(prices)
     es10=calculate_var(prices)
     return var0,es0,var10,es10
-
-def backtest_var():
-    
-    pass
 
 
 
@@ -309,7 +331,7 @@ def main():
         risk_data = r_risks.iloc[       it-local_pivot:it+timesteps].values
         instr_data = r_instruments.iloc[it-local_pivot:it+timesteps]#what for?
         init_ins = act_instruments.iloc[  INSTRUMENTS_LOOKBACK+it,:].values.reshape(-1)
-        instr_results =        np.zeros(shape = ( timesteps, instr_data.shape[1], simulations_num)) #Сюда запишем результат предсказаний по инструментам
+
         risk_factors_history = np.zeros(shape = ( timesteps, RISK_FACTORS_NUM,    simulations_num)) #Сюда запишем историю симуляции рисков
 
         #estimation of params for risk sim
@@ -323,7 +345,6 @@ def main():
             sim = generate_gbm_sim(init_array, gbm_params, stochs, dt, timesteps)
             risk_factors_history[:,:,sim_id] = sim
 
-        pdb.set_trace()
         instruments_names = instr_data.columns
 
         broadcasted_lookback_history = np.stack([risk_data[:INSTRUMENTS_LOOKBACK] for _ in range(simulations_num)], axis=-1)
@@ -333,8 +354,9 @@ def main():
 
         simulated_instruments = np.stack([inference_models(appended_history[:,:,sim_id], models)for sim_id in range(simulations_num)], axis=-1)#array of shape (tsteps,instruments_num,simulations_num, )
 
-
-        risks = calculate_risks(simulated_instruments)
+        one_day_history = r_instruments.iloc[-timesteps:-timesteps+1]
+        ten_day_history = r_instruments.iloc[-timesteps:]
+        risks = calculate_risks(simulated_instruments,one_day_history,ten_day_history)
         calculated_risks[time] = risks
     
 
