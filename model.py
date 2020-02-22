@@ -273,40 +273,43 @@ def calculate_var_and_es(r):
     es = r[r<var_for_es].mean()
     return var, es
 
+def calculate_portfolio_risks(r, calculate_individuals=True):
+    #shape (instruments, simulation)
+    ports = {}
+    for port_name, port_index in PORTFOLIOS_INDEX.items():
+        var,es = calculate_var_and_es(r[port_index])
+        ports[port_name] = {'var':var,'es':es}
+    if calculate_individuals:
+        for ix, name in enumerate(instruments_names):
+            var,es = calculate_var_and_es(r[ix])
+            ports[name] = {'var':var,'es':es}
+    return ports
 
 
 
-
-# def calculate_es(prices):# array of shape (instruments_num, simulations_num)
-#     ESes = [prices[i][prices[i]<np.percentile(prices[i], q=2.5)].mean() for i in range(prices.shape[0]) ]
-#     return ESes
 
 def calculate_risks(
     instruments_values, #array of shape (tsteps,instruments_num,simulations_num, ) 
     one_day_history, # init and next day
     ten_day_history # data from init to the 'timesteps' 
     ):
-
-    #TODO добавить портфелизацию - подсчет риска для захардкоженных портфелей
     # es and var, 1 and 10 days
     original_prices = np.array(PRICE_OF_INSTRUMENTS,dtype=float)
     original_prices_broadcasted = np.broadcast_to(original_prices.reshape(-1,1), instruments_values.shape[1:])
-    prices = original_prices_broadcasted.copy()
+    prices = original_prices_broadcasted.copy()#shape (instruments, simulations)
 
     for i in range(instruments_values.shape[0]):
         #move one day forward
         cur_movements = instruments_values[i,:,:]
         prices +=np.multiply(prices, cur_movements)
         if i==0:
-            var0=calculate_var(prices)
-            es0 = calculate_es(prices)
+            risks_for_1 = calc_portfolio_risks(prices-original_prices_broadcasted)
         
         #rebalance
         prices = np.multiply((prices.sum(axis=0)/original_prices.sum()), prices)
 
-    var10=calculate_var(prices)
-    es10=calculate_var(prices)
-    return var0,es0,var10,es10
+    risks_for_10 = calc_portfolio_risks(prices-original_prices_broadcasted)
+    return risks_for_1, risks_for_10
 
 
 
@@ -321,7 +324,9 @@ def main():
     
     stoch_gen = stoch_wrapper(r_risks)
     models = train_models(r_risks, r_instruments) #мы ограничиваем трейн?
-    
+    global instruments_names
+    instruments_names = r_instruments.columns
+
     calculated_risks=dict()
     for it in range(max(RISKS_LOOKBACK, INSTRUMENTS_LOOKBACK,1), r_risks.shape[0]-timesteps):
         if it%100==0:
@@ -345,7 +350,6 @@ def main():
             sim = generate_gbm_sim(init_array, gbm_params, stochs, dt, timesteps)
             risk_factors_history[:,:,sim_id] = sim
 
-        instruments_names = instr_data.columns
 
         broadcasted_lookback_history = np.stack([risk_data[:INSTRUMENTS_LOOKBACK] for _ in range(simulations_num)], axis=-1)
         # broadcasted_lookback_history = np.broadcast_to(risk_data[:INSTRUMENTS_LOOKBACK],(INSTRUMENTS_LOOKBACK,RISK_FACTORS_NUM,simulations_num))
