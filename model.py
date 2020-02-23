@@ -12,7 +12,7 @@ import pdb
 import matplotlib.pyplot as plt
 import arch
 import scipy.stats as ss
-
+import multiprocessing as mp
 #TODO написать бэктестинг - прогон и оценку оригинальных данных по вычисленным рискам
 
 
@@ -208,13 +208,15 @@ def params_for_gbm(data):
     return mu, sigma_sq,drift
 
 
-def generate_gbm_sim(init_array, pred_param, stochs,dt, time_steps):
+def generate_gbm_sim(init_array, gbm_params,dt, timesteps):
     #generates one complete simulaiton
-    mu, sigma_sq, drift = pred_param
-    sim_res = np.zeros(shape=(time_steps+1, RISK_FACTORS_NUM))
+    stochs = stoch_gen(timesteps)
+
+    mu, sigma_sq, drift = gbm_params
+    sim_res = np.zeros(shape=(timesteps+1, RISK_FACTORS_NUM))
     sim_res[0,:] = init_array
     # stochs - np array of (tsteps, factors)
-    for t in range(time_steps):
+    for t in range(timesteps):
 
         sim_res[t+1] = sim_res[t] + drift * dt + np.sqrt(sigma_sq) * stochs[t]
 
@@ -252,7 +254,7 @@ def plot_sim(simulation):
 
 def calc_VaR(r, level=0.95, kind='historical'):# get 1d array of values
     if kind=='historical':
-        return np.percentile(r, axis=1, q=level*100)
+        return np.percentile(r, q=level*100)
     elif kind=='normal':
         mu, sigma = np.mean(r), np.std(r)
         return - mu + ss.norm.ppf(level) * sigma
@@ -269,7 +271,7 @@ def calculate_var_and_es(r):
     es_alpha=0.025
 
     var = calc_VaR(r, level=var_alpha)
-    var_for_es = calc_VaR(r, level=es_alpha).reshape(-1,1)
+    var_for_es = calc_VaR(r, level=es_alpha)
     es = r[r<var_for_es].mean()
     return var, es
 
@@ -304,10 +306,10 @@ def calculate_risks(
         cur_movements = instruments_values[i,:,:]
         prices +=np.multiply(prices, cur_movements)
         if i==0:
-            risks_for_1 = [['1day', *x] for x in calculate_portfolio_risks((prices-original_prices_broadcasted).sum(axis=1))]
+            risks_for_1 = [['1day', *x] for x in calculate_portfolio_risks((prices-original_prices_broadcasted).sum(axis=0))]
         #rebalance
         prices = np.multiply((prices.sum(axis=0)/original_prices.sum()), prices)
-    risks_for_10 = [['10day', *x] for x in calculate_portfolio_risks((prices-original_prices_broadcasted).sum(axis=1))]
+    risks_for_10 = [['10day', *x] for x in calculate_portfolio_risks((prices-original_prices_broadcasted).sum(axis=0))]
     return risks_for_1+risks_for_10
 
 
@@ -317,6 +319,7 @@ def backtest_main_loop(
     r_instruments,):
     back_test_results = []
     for instrument in df_risks['portfolio_name'].unique():
+        print(instrument)
         if instrument in r_instruments:
             ix = [list(r_instruments.columns).index(instrument)]
         elif instrument in PORTFOLIOS_INDEX.keys():
@@ -330,54 +333,54 @@ def backtest_main_loop(
         prices = [PRICE_OF_INSTRUMENTS[i] for i in ix]
         risk_results = [[instrument, *x] for x in calculate_hits_for_instrument(risk_pivot, instrument_data, prices)]
         back_test_results.extend(risk_results)
-    back_test_results = pd.DataFrame(back_test_results, columns=['portfolio','risk_kind', 'hits', 'count'])
-    back_test_results['two_sided_hyp'] = back_test_results.apply(lambda x: ss.binom_test(x['hits'],x['count'],0.01,alternative='two-sided'))
-    back_test_results['conservative_hyp'] = back_test_results.apply(lambda x: ss.binom_test(x['hits'],x['count'],0.01,alternative='greater'))
-    back_test_results['proportion'] = back_test_results['hits']/back_test_results['count']
-    return back_test_results
+    back_test_results_df = pd.DataFrame(back_test_results, columns=['portfolio','risk_kind', 'hits', 'count'])
+
+    back_test_results_df['two_sided_hyp'] = back_test_results_df.apply(lambda x: ss.binom_test(x['hits'],x['count'],0.01,alternative='two-sided'), axis=1)
+    back_test_results_df['conservative_hyp'] = back_test_results_df.apply(lambda x: ss.binom_test(x['hits'],x['count'],0.01,alternative='greater'), axis=1)
+    back_test_results_df['proportion'] = back_test_results_df['hits']/back_test_results_df['count']
+    return back_test_results_df
 
 def calculate_hits_for_instrument(
     risk_pivot, #pivot table: date index, kind+horizon risk columns, risk values 
     instrument_data, #yields for each item in portfolio on each date, df shape (dates, instruments)
-    prices, #base prices for instruments inportgolio
+    prices, #base prices for instruments in portfolio
     ):
     # vital point - we dont rebalance during backtest
     risks_results = []
-
     first_day_data = pd.DataFrame(index=instrument_data.index)
     ten_day_data   = pd.DataFrame(index=instrument_data.index)
-    for instrument,  instrument_ix in enumerate(instrument_data.columns):
-        inst_df = pd.concat([instrument_data[instrument].shift(-i) for i in range(10)], axis=1)
-        price_ins = np.broadcast_to([prices[instrument_ix]], (inst_df.shape[0], 1))
+    for instrument_ix, instrument  in enumerate(instrument_data.columns):
+        inst_df = pd.concat([instrument_data.loc[:,instrument].shift(-i) for i in range(10)], axis=1)
+        price_ins = np.broadcast_to([prices[instrument_ix]], (inst_df.shape[0]))
         for timestep in range(10):
-            price_ins += price_ins*inst_df.iloc[:,timestep]
+            price_ins = price_ins+price_ins*inst_df.iloc[:,timestep]
             if timestep==0:
                 first_day_data[f'{instrument}'] = price_ins
         ten_day_data[f'{instrument}'] = price_ins
+    first_day_data=first_day_data.sum(axis=1)
+    first_day_data.name = 'fact'
     var_1day_test = pd.merge(
         risk_pivot['var_1day'],
-        first_day_data.sum(axis=1),
+        first_day_data,
         left_index=True,
         right_index=True,
         how='left'
     )
-    var_1day_test.columns = ['var_1day', 'fact']
-    var_1day_hits = (var_1day_test['var_1day']-var_1day_test['fact'])
+    var_1day_hits = ((var_1day_test['var_1day']-var_1day_test['fact'])>0).sum()
     var_1day_count = var_1day_test.shape[0]
     risks_results.append(['var_1', var_1day_hits, var_1day_count])
+    ten_day_data=ten_day_data.sum(axis=1)
+    ten_day_data.name = 'fact'
     var_10day_test = pd.merge(
         risk_pivot['var_10day'],
-        ten_day_data.sum(axis=1),
+        ten_day_data,
         left_index=True,
         right_index=True,
         how='left'
     )
-    var_10day_test.columns = ['var_10day', 'fact']
-    var_10day_hits = (var_10day_test['var_10day']-var_10day_test['fact'])
+    var_10day_hits = ((var_10day_test['var_10day']-var_10day_test['fact'])>0).sum()
     var_10day_count = var_10day_test.shape[0]
     risks_results.append(['var_10', var_10day_hits, var_10day_count])
-
-
     return risks_results
 
 
@@ -434,56 +437,82 @@ def calculate_hits_for_instrument(
 
     # backtest_results = backtest_main_loop(df_risks, r_instruments)
     # return r_risks, r_instruments, act_risks, act_instruments,df_risks,backtest_results
-timesteps=10
-dt = 1/247
-simulations_num=SIM_NUM
-r_risks, r_instruments, act_risks, act_instruments = get_data()
-logger.info('Data is fetched')
 
-stoch_gen = stoch_wrapper(r_risks)
-models = train_models(r_risks, r_instruments) #мы ограничиваем трейн?
-global instruments_names
-instruments_names = r_instruments.columns
-
-calculated_risks=list()# will be list of format ['date', {'1day','10day}, 'portfolio_name',{'es','var'}, value]
-for it in range(max(RISKS_LOOKBACK, INSTRUMENTS_LOOKBACK,1), r_risks.shape[0]-timesteps):
-    if it%100==0:
-        logger.info(f'iteration {it} is in')
-    local_pivot = max(RISKS_LOOKBACK, INSTRUMENTS_LOOKBACK)
-    time = r_risks.index[it]
-    risk_data = r_risks.iloc[       it-local_pivot:it+timesteps].values
-    instr_data = r_instruments.iloc[it-local_pivot:it+timesteps]#what for?
-    init_ins = act_instruments.iloc[  INSTRUMENTS_LOOKBACK+it,:].values.reshape(-1)
-
-    risk_factors_history = np.zeros(shape = ( timesteps, RISK_FACTORS_NUM,    simulations_num)) #Сюда запишем историю симуляции рисков
-
-    #estimation of params for risk sim
-    history_to_estimate_params = r_risks.iloc[local_pivot-RISKS_LOOKBACK:-timesteps]
-    init_array = r_risks.iloc[-timesteps]
-
-    gbm_params = params_for_gbm(history_to_estimate_params)
-    for sim_id in range(simulations_num):
-        stochs = stoch_gen(timesteps)
-
-        sim = generate_gbm_sim(init_array, gbm_params, stochs, dt, timesteps)
-        risk_factors_history[:,:,sim_id] = sim
+if __name__=='__main__':
+    timesteps=10
+    dt = 1/247
+    debug=True
+    simulations_num=SIM_NUM
+    r_risks, r_instruments, act_risks, act_instruments = get_data()
+    if debug:
+        r_risks=r_risks.iloc[:-940]
+        r_instruments=r_instruments.iloc[:-940]
+        act_risks=act_risks.iloc[:-940]
+        act_instruments=act_instruments.iloc[:-940]
 
 
-    broadcasted_lookback_history = np.stack([risk_data[:INSTRUMENTS_LOOKBACK] for _ in range(simulations_num)], axis=-1)
-    appended_history = np.concatenate((broadcasted_lookback_history,risk_factors_history),axis=0)
+
+    logger.info('Data is fetched')
+
+    stoch_gen = stoch_wrapper(r_risks)
+    models = train_models(r_risks, r_instruments) #мы ограничиваем трейн?
+    global instruments_names
+    instruments_names = r_instruments.columns
+
+    calculated_risks=list()# will be list of format ['date', {'1day','10day}, 'portfolio_name',{'es','var'}, value]
+    for it in range(max(RISKS_LOOKBACK, INSTRUMENTS_LOOKBACK,1), r_risks.shape[0]-timesteps):
+        if it%100==0:
+            logger.info(f'iteration {it} is in')
+        local_pivot = max(RISKS_LOOKBACK, INSTRUMENTS_LOOKBACK)
+        time = r_risks.index[it]
+        risk_data = r_risks.iloc[       it-local_pivot:it+timesteps].values
+        instr_data = r_instruments.iloc[it-local_pivot:it+timesteps]#what for?
+        init_ins = act_instruments.iloc[  INSTRUMENTS_LOOKBACK+it,:].values.reshape(-1)
+
+        # risk_factors_history = np.zeros(shape = ( timesteps, RISK_FACTORS_NUM,    simulations_num)) #Сюда запишем историю симуляции рисков
+
+        #estimation of params for risk sim
+        history_to_estimate_params = r_risks.iloc[local_pivot-RISKS_LOOKBACK:-timesteps]
+        init_array = r_risks.iloc[-timesteps]
+
+        gbm_params = params_for_gbm(history_to_estimate_params)
 
 
-    simulated_instruments = np.stack([inference_models(appended_history[:,:,sim_id], models)for sim_id in range(simulations_num)], axis=-1)#array of shape (tsteps,instruments_num,simulations_num, )
 
-    one_day_history = r_instruments.iloc[-timesteps:-timesteps+1]
-    ten_day_history = r_instruments.iloc[-timesteps:]
-    risks = calculate_risks(simulated_instruments,one_day_history,ten_day_history)#format: list of elements - [{'1day','10day}, 'portfolio_name',{'es','var'}, value]
-    calculated_risks.extend([[time, *x] for x in risks])
+        # def log_result(result):
+        #     risk_factors_history.append(result)
 
-df_risks = pd.DataFrame(calculated_risks, columns=['date','horizon', 'portfolio_name','risk_kind', 'value'])
-df_risks['kind_and_horizon'] = df_risks.apply(lambda x:x['risk_kind']+'_'+x['horizon'], axis=1)
+        def apply_pool():
+            pool = mp.Pool(6)
+            result = [pool.apply(generate_gbm_sim, kwds = {'init_array':init_array, 'gbm_params':gbm_params,'dt':dt, 'timesteps':timesteps}) for i in range(simulations_num)]
+            pool.close()
+            # pool.join()
+            risk_factors_history = np.stack(result, axis=-1)
+            return risk_factors_history
+        risk_factors_history = apply_pool()
 
-backtest_results = backtest_main_loop(df_risks, r_instruments)
+        # risk_factors_history = np.stack(risk_factors_history, axis=-1)
+        # for sim_id in range(simulations_num):
+
+        #     sim = generate_gbm_sim(init_array, gbm_params, stochs, dt, timesteps)
+        #     risk_factors_history[:,:,sim_id] = sim
+
+
+        broadcasted_lookback_history = np.stack([risk_data[:INSTRUMENTS_LOOKBACK] for _ in range(simulations_num)], axis=-1)
+        appended_history = np.concatenate((broadcasted_lookback_history,risk_factors_history),axis=0)
+
+
+        simulated_instruments = np.stack([inference_models(appended_history[:,:,sim_id], models)for sim_id in range(simulations_num)], axis=-1)#array of shape (tsteps,instruments_num,simulations_num, )
+
+        one_day_history = r_instruments.iloc[-timesteps:-timesteps+1]
+        ten_day_history = r_instruments.iloc[-timesteps:]
+        risks = calculate_risks(simulated_instruments,one_day_history,ten_day_history)#format: list of elements - [{'1day','10day}, 'portfolio_name',{'es','var'}, value]
+        calculated_risks.extend([[time, *x] for x in risks])
+
+    df_risks = pd.DataFrame(calculated_risks, columns=['date','horizon', 'portfolio_name','risk_kind', 'value'])
+    df_risks['kind_and_horizon'] = df_risks.apply(lambda x:x['risk_kind']+'_'+x['horizon'], axis=1)
+
+    backtest_results = backtest_main_loop(df_risks, r_instruments)
 
 
 
