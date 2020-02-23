@@ -367,6 +367,7 @@ def main():
         calculated_risks.extend([[time, *x] for x in risks])
 
     df_risks = pd.DataFrame(calculated_risks, columns=['date','horizon', 'portfolio_name','risk_kind', 'value'])
+    df_risks['kind_and_horizon'] = df_risks.apply(lambda x:x['risk_kind']+'_'+x['horizon'], axis=1)
     return calculated_risks
 
  
@@ -379,28 +380,72 @@ def backtest_main_loop(
 ):
     for instrument in df_risks['portfilio_name'].unique():
         if instrument in r_instruments:
-            instrument_data = r_instruments.loc[:,instrument]
+            ix = [list(r_instruments.columns).index(instrument)]
         elif instrument in PORTFOLIOS_INDEX.keys():
-            instrument_data = r_instruments.iloc[:,PORTFOLIOS_INDEX[instrument]]
+            ix = PORTFOLIOS_INDEX[instrument]
         else:
             logger.error(f'{instrument} portfolio hasnt been found')
-        print(f'{instrument} portfolio hasnt been found')
-        continue
-        for risk_kind in sorted(df_risks['risk_kind'].unique()):
-            risks_data = df_risks.loc[
-                (
-                    df_risks['risk_kind']==risk_kind
-                )&(
-                    df_risks['portfolio_name']==instrument
-                )
-            ]
-            result = calc_one_risk_kind_one_instrument(risks_data, instrument_data)
+            print(f'{instrument} portfolio hasnt been found')
+            continue
+
+        instrument_data = r_instruments.iloc[:,ix]
+        risk_pivot = df_risks.loc[df_risks['portfolio_name']==instrument].pivot_table(index='date',columns='kind_and_horizon',values='value',agg_func='mean')
+        prices = [PRICE_OF_INSTRUMENTS[i] for i in ix]
+
+        calculate_hits_for_instrument(risk_pivot, instrument_data, prices)
+        # for risk_kind in sorted(df_risks['risk_kind'].unique()):
+        #     risks_data = df_risks.loc[
+        #         (
+        #             df_risks['risk_kind']==risk_kind
+        #         )&(
+        #             df_risks['portfolio_name']==instrument
+        #         )
+        #     ]
+        #     result = calc_one_risk_kind_one_instrument(risks_data, instrument_data)
             #do something with result
 
 
-def calc_one_risk_kind_one_instrument(risks_data, instrument_data):
-    #actually calculate risk
-    return []
+def calculate_hits_for_instrument(
+    risk_pivot, #pivot table: date index, kind+horizon risk columns, risk values 
+    instrument_data, #yields for each item in portfolio on each date, df shape (dates, instruments)
+    prices, #base prices for instruments inportgolio
+    ):
+    # vital point - we dont rebalance during backtest
+    first_day_data = pd.DataFrame(index=instrument_data.index)
+    ten_day_data   = pd.DataFrame(index=instrument_data.index)
+    for instrument,  instrument_ix in enumerate(instrument_data.columns):
+        inst_df = pd.concat([instrument_data[instrument].shift(-i) for i in range(10)], axis=1)
+        price_ins = np.broadcast_to([prices[instrument_ix]], (inst_df.shape[0], 1))
+        for timestep in range(10):
+            price_ins += price_ins*inst_df.iloc[:,timestep]
+            if timestep==0:
+                first_day_data[f'{instrument}'] = price_ins
+        ten_day_data[f'{instrument}'] = price_ins
+    var_1day_test = pd.merge(
+        risk_pivot['var_1day'],
+        first_day_data.sum(axis=1),
+        left_index=True,
+        right_index=True,
+        how='left'
+    )
+    var_1day_test.columns = ['var_1day', 'fact']
+    var_1day_hits = (var_1day_test['var_1day']-var_1day_test['fact'])
+    var_1day_count = var_1day_test.shape[0]
+
+    var_10day_test = pd.merge(
+        risk_pivot['var_10day'],
+        ten_day_data.sum(axis=1),
+        left_index=True,
+        right_index=True,
+        how='left'
+    )
+    var_10day_test.columns = ['var_10day', 'fact']
+    var_10day_hits = (var_10day_test['var_10day']-var_10day_test['fact'])
+    var_10day_count = var_10day_test.shape[0]
+
+    # add es counting also!
+
+    return [var_1day_hits,var_1day_count,var_10day_hits,var_10day_count,]
 
 """
 
