@@ -368,7 +368,9 @@ def main():
 
     df_risks = pd.DataFrame(calculated_risks, columns=['date','horizon', 'portfolio_name','risk_kind', 'value'])
     df_risks['kind_and_horizon'] = df_risks.apply(lambda x:x['risk_kind']+'_'+x['horizon'], axis=1)
-    return calculated_risks
+
+    backtest_results = backtest_main_loop(df_risks, r_instruments)
+    return r_risks, r_instruments, act_risks, act_instruments,df_risks,backtest_results
 
  
 
@@ -378,6 +380,7 @@ def backtest_main_loop(
     df_risks,
     r_instruments,
 ):
+    back_test_results = []
     for instrument in df_risks['portfilio_name'].unique():
         if instrument in r_instruments:
             ix = [list(r_instruments.columns).index(instrument)]
@@ -392,18 +395,16 @@ def backtest_main_loop(
         risk_pivot = df_risks.loc[df_risks['portfolio_name']==instrument].pivot_table(index='date',columns='kind_and_horizon',values='value',agg_func='mean')
         prices = [PRICE_OF_INSTRUMENTS[i] for i in ix]
 
-        calculate_hits_for_instrument(risk_pivot, instrument_data, prices)
-        # for risk_kind in sorted(df_risks['risk_kind'].unique()):
-        #     risks_data = df_risks.loc[
-        #         (
-        #             df_risks['risk_kind']==risk_kind
-        #         )&(
-        #             df_risks['portfolio_name']==instrument
-        #         )
-        #     ]
-        #     result = calc_one_risk_kind_one_instrument(risks_data, instrument_data)
-            #do something with result
+        risk_results = [[instrument, *x] for x in calculate_hits_for_instrument(risk_pivot, instrument_data, prices)]
+        back_test_results.extend(risk_results)
 
+    back_test_results = pd.DataFrame(back_test_results, columns=['portfolio','risk_kind', 'hits', 'count'])
+    
+    back_test_results['two_sided_hyp'] = back_test_results.apply(lambda x: ss.binom_test(x['hits'],x['count'],0.01,alternative='two-sided'))
+    back_test_results['conservative_hyp'] = back_test_results.apply(lambda x: ss.binom_test(x['hits'],x['count'],0.01,alternative='greater'))
+    back_test_results['proportion'] = back_test_results['hits']/back_test_results['count']
+
+    return back_test_results
 
 def calculate_hits_for_instrument(
     risk_pivot, #pivot table: date index, kind+horizon risk columns, risk values 
@@ -411,6 +412,8 @@ def calculate_hits_for_instrument(
     prices, #base prices for instruments inportgolio
     ):
     # vital point - we dont rebalance during backtest
+    risks_results = []
+
     first_day_data = pd.DataFrame(index=instrument_data.index)
     ten_day_data   = pd.DataFrame(index=instrument_data.index)
     for instrument,  instrument_ix in enumerate(instrument_data.columns):
@@ -431,7 +434,7 @@ def calculate_hits_for_instrument(
     var_1day_test.columns = ['var_1day', 'fact']
     var_1day_hits = (var_1day_test['var_1day']-var_1day_test['fact'])
     var_1day_count = var_1day_test.shape[0]
-
+    risks_results.append(['var_1', var_1day_hits, var_1day_count])
     var_10day_test = pd.merge(
         risk_pivot['var_10day'],
         ten_day_data.sum(axis=1),
@@ -442,10 +445,10 @@ def calculate_hits_for_instrument(
     var_10day_test.columns = ['var_10day', 'fact']
     var_10day_hits = (var_10day_test['var_10day']-var_10day_test['fact'])
     var_10day_count = var_10day_test.shape[0]
+    risks_results.append(['var_10', var_10day_hits, var_10day_count])
 
-    # add es counting also!
 
-    return [var_1day_hits,var_1day_count,var_10day_hits,var_10day_count,]
+    return risks_results
 
 """
 
