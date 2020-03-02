@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import arch
 import scipy.stats as ss
 import multiprocessing as mp
+from lightgbm import LGBMRegressor
 #TODO написать бэктестинг - прогон и оценку оригинальных данных по вычисленным рискам
 
 
@@ -66,7 +67,7 @@ def get_model():
     return Pipeline(steps=[
         ('scale', StandardScaler()),
         ('pca', PCA()),
-        ('rf', RandomForestRegressor()), 
+        ('rf', LinearRegression()), 
     ])
 
 
@@ -78,7 +79,7 @@ def select_models(data, y):
         pipe = get_model()
         param_grid ={
             'pca__n_components':[1,2,3,4,5],
-            'rf__n_estimators':[5,10,30,50,100]
+            #'rf__n_estimators':[5,10,30,50,100]
         }
         gs = GridSearchCV(estimator=pipe, cv=TimeSeriesSplit(n_splits=4), param_grid=param_grid)
         gs.fit(data, y.iloc[:,instrument_ix])
@@ -486,10 +487,12 @@ if __name__=='__main__':
     global instruments_names
     instruments_names = r_instruments.columns
     
+    simsim = np.array([])
+
     if retrain:
 
         models = train_models(r_risks.iloc[:INSTRUMENTS_LOOKBACK], r_instruments.iloc[:INSTRUMENTS_LOOKBACK], model_params) #мы ограничиваем трейн?
-
+    i = 0
     calculated_risks=list()# will be list of format ['date', {'1day','10day}, 'portfolio_name',{'es','var'}, value]
     for it in range(max(RISKS_LOOKBACK, INSTRUMENTS_LOOKBACK,0), r_risks.shape[0]-timesteps):
         if it%50==0:
@@ -536,14 +539,27 @@ if __name__=='__main__':
         risks = calculate_risks(simulated_instruments) #format: list of elements - [{'1day','10day}, 'portfolio_name',{'es','var'}, value]
         calculated_risks.extend([[time, *x] for x in risks])
 
+        if i == 0:
+            simsim = np.expand_dims(simulated_instruments, axis=0)
+        else:
+            simsim = np.hstack([simsim, np.expand_dims(simulated_instruments, axis=0)]) 
+            # print(simsim.shape)
+            # print(simulated_instruments.shape)
+            #simsim = np.hstack([simsim, simulated_instruments])
+        i += 1
+        #simsim = simsim.reshape((it,*simulated_instruments.shape))
+        #print(simulated_instruments.shape)
         ##diagnostics graphs
         if it%10==0:
             for i in range(RISK_FACTORS_NUM):
                 real=r_risks.iloc[it-1:it+timesteps,i]
                 rdf = pd.DataFrame(risk_factors_history[:,i],index=real.index[1:])
                 plt.plot(rdf, alpha=0.1)
-                plt.plot(real, c='black',)
+                r = plt.plot(real, c='black',)
                 plt.title(r_risks.columns[i])
+                plt.legend(r, ['real'])
+                plt.xlabel('Date')
+                plt.xticks(real.index)
                 plt.savefig(f'./diag_graphs/{it}_risk_{r_risks.columns[i]}.png')
                 plt.clf()
                 plt.cla()
@@ -552,14 +568,28 @@ if __name__=='__main__':
                 real=r_instruments.iloc[it-1:it+timesteps,i]
                 rdf = pd.DataFrame(simulated_instruments[:,i],index=real.index[1:])
                 plt.plot(rdf, alpha=0.1)
-                plt.plot(real, c='black',)
+                r = plt.plot(real, c='black',)
                 plt.title(r_instruments.columns[i])
+                plt.legend(r, ['real'])
+                plt.xlabel('Date')
+                plt.xticks(real.index)
                 plt.savefig(f'./diag_graphs/{it}_ins_{r_instruments.columns[i]}.png')
                 plt.clf()
                 plt.cla()
                 plt.close()
 
-
+    # print(simsim.shape)
+    # simsim = simsim.reshape((149 ,10,17,500))
+    # for i in range(RISK_FACTORS_NUM):
+    #     real=r_instruments.iloc[:,i]
+    #     rdf = pd.DataFrame(simsim[:,:,i],index=real.index[1:])
+    #     plt.plot(rdf, alpha=0.1)
+    #     plt.plot(real, c='black',)
+    #     plt.title(r_instruments.columns[i])
+    #     plt.savefig(f'./diag_graphs/ins_{r_instruments.columns[i]}.png')
+    #     plt.clf()
+    #     plt.cla()
+    #     plt.close()
     df_risks = pd.DataFrame(calculated_risks, columns=['date','horizon', 'portfolio_name','risk_kind', 'value'])
     df_risks['kind_and_horizon'] = df_risks.apply(lambda x:x['risk_kind']+'_'+x['horizon'], axis=1)
 
